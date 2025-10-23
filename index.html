@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BasedButton • Withdraw (Offline Ready)</title>
+<style>
+body{background:linear-gradient(160deg,#021738,#0a2a66);color:#e8f0ff;font-family:system-ui,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0}
+.card{background:rgba(14,46,120,.5);border:1px solid #174fb5;border-radius:16px;padding:24px;width:420px;box-shadow:0 0 30px rgba(8,34,100,.6)}
+h2{text-align:center;margin-top:0}
+.muted{font-size:13px;color:#a5bfff;text-align:center}
+a{color:#6cbaff;text-decoration:none}
+label{font-size:14px;color:#aac6ff}
+input{width:100%;padding:10px;margin:6px 0 14px;border-radius:8px;border:1px solid #174fb5;background:#071c44;color:#fff}
+button{width:100%;padding:12px;border:none;border-radius:12px;background:linear-gradient(180deg,#d7e8ff,#a6c9ff);color:#0a1e5f;font-weight:800;cursor:pointer}
+button:hover{filter:brightness(1.1)}
+.ok{color:#a7f3d0}.err{color:#ffb4b4}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+</style>
+</head>
+<body>
+<div class="card">
+  <h2>Withdraw ETH 💙</h2>
+  <div class="muted">
+    Contratto:
+    <a href="https://basescan.org/address/0x37e3a8d3ba53f43d955f83b54cbe4c0d39a10b83" target="_blank">
+      0x37e3…0b83 ↗
+    </a>
+  </div>
+
+  <p id="info" class="muted">Saldo contratto: — ETH</p>
+  <div class="row">
+    <button id="connectMM">🔗 MetaMask</button>
+    <button id="connectRB">🦝 Rabby</button>
+  </div>
+  <label>Destinatario</label>
+  <input id="to" placeholder="0x..." />
+  <label>Importo (ETH)</label>
+  <input id="amount" type="number" min="0" step="0.0001" placeholder="0.0" />
+  <div class="row">
+    <button id="max">Max</button>
+    <button id="withdraw">Invia ➜</button>
+  </div>
+  <div id="status" class="muted">In attesa...</div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.2/dist/ethers.umd.min.js"></script>
+<script>
+const CONTRACT="0x37e3a8d3ba53f43d955f83b54cbe4c0d39a10b83";
+const ABI=[
+{"inputs":[],"name":"owner","outputs":[{"internalType":"address","name":"","type":"address"}],"stateMutability":"view","type":"function"},
+{"inputs":[],"name":"tipsBalance","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"},
+{"inputs":[{"internalType":"address payable","name":"to","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"withdraw","outputs":[],"stateMutability":"nonpayable","type":"function"}
+];
+const BASE_CHAIN="0x2105"; // Base mainnet
+let provider,signer,contract,bal=0n;
+const $=id=>document.getElementById(id);
+
+function setStatus(msg,ok=null){$("status").textContent=msg;$("status").className=ok===null?"muted":ok?"ok":"err"}
+
+async function connectWallet(prefer){
+  try{
+    if(!window.ethereum) throw new Error("Nessun wallet trovato. Apri in browser con MetaMask o Rabby.");
+    const list=window.ethereum.providers||[window.ethereum];
+    let eth=null;
+    if(prefer==="metamask") eth=list.find(p=>p.isMetaMask)||window.ethereum;
+    else if(prefer==="rabby") eth=list.find(p=>p.isRabby)||window.ethereum;
+    else eth=window.ethereum;
+    if(!eth) throw new Error("Nessun provider disponibile.");
+
+    try{await eth.request({method:"wallet_switchEthereumChain",params:[{chainId:BASE_CHAIN}]})}
+    catch(e){if(e.code===4902){
+      await eth.request({method:"wallet_addEthereumChain",params:[{
+        chainId:BASE_CHAIN,chainName:"Base",nativeCurrency:{name:"ETH",symbol:"ETH",decimals:18},
+        rpcUrls:["https://mainnet.base.org"],blockExplorerUrls:["https://basescan.org"]
+      }]});
+    }else throw e;}
+
+    await eth.request({method:"eth_requestAccounts"});
+    provider=new ethers.BrowserProvider(eth);
+    signer=await provider.getSigner();
+    contract=new ethers.Contract(CONTRACT,ABI,signer);
+    setStatus("Wallet connesso ✅",true);
+    await refresh();
+  }catch(e){setStatus(e.message||e,false);}
+}
+
+async function refresh(){
+  try{
+    bal=await contract.tipsBalance();
+    $("info").textContent="Saldo contratto: "+ethers.formatEther(bal)+" ETH";
+  }catch(e){$("info").textContent="Errore lettura saldo";}
+}
+
+$("connectMM").onclick=()=>connectWallet("metamask");
+$("connectRB").onclick=()=>connectWallet("rabby");
+$("max").onclick=()=>{$("amount").value=ethers.formatEther(bal);};
+$("withdraw").onclick=async()=>{
+  if(!contract) return setStatus("Connettiti prima.",false);
+  const to=$("to").value.trim();
+  const amt=$("amount").value.trim();
+  if(!ethers.isAddress(to)) return setStatus("Indirizzo non valido.",false);
+  if(!amt||Number(amt)<=0) return setStatus("Importo non valido.",false);
+  const wei=ethers.parseEther(amt);
+  if(wei>bal) return setStatus("Importo superiore al saldo.",false);
+  try{
+    setStatus("Invio transazione...");
+    const tx=await contract.withdraw(to,wei);
+    setStatus("Tx inviata: "+tx.hash.slice(0,10)+"...",true);
+    await tx.wait();
+    setStatus("✅ Completato",true);
+    await refresh();
+  }catch(e){setStatus(e.shortMessage||e.message||e,false);}
+};
+</script>
+</body>
+</html>
